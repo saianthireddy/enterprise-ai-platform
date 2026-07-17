@@ -1,0 +1,11 @@
+{
+  "title": "Enterprise AI Platform",
+  "panels": [
+    { "type": "graph", "title": "AI requests / min", "targets": [{ "expr": "rate(ai_requests_total[1m])" }] },
+    { "type": "graph", "title": "p95 latency (ms)", "targets": [{ "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) * 1000" }] },
+    { "type": "stat", "title": "Search accuracy", "targets": [{ "expr": "search_accuracy_ratio" }] },
+    { "type": "stat", "title": "Estimated cost (USD)", "targets": [{ "expr": "estimated_cost_usd_total" }] }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
