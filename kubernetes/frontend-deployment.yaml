@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eap-frontend
+  labels:
+    app: eap-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: eap-frontend
+  template:
+    metadata:
+      labels:
+        app: eap-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/saianthireddy/enterprise-ai-platform-frontend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://api.enterprise-ai-platform.example.com"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5

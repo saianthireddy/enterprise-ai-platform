@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eap-backend
+  labels:
+    app: eap-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: eap-backend
+  template:
+    metadata:
+      labels:
+        app: eap-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/saianthireddy/enterprise-ai-platform-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: eap-config
+            - secretRef:
+                name: eap-secrets
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
