@@ -1,0 +1,50 @@
+name: Retraining
+
+on:
+  schedule:
+    # Mondays 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  retrain:
+    name: intent router
+    runs-on: ubuntu-latest
+
+    # Job-level env so the Slack step's `if` can test for the secret.
+    # The `secrets` context is not available in a step-level `if`.
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train and evaluate challenger
+        id: train
+        run: |
+          python scripts/train_router.py | tee train.log
+          echo "summary=$(tail -n 1 train.log)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload registry artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: intent-router-registry
+          path: artifacts/registry/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Notify Slack
+        if: ${{ always() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "$(printf '{"text": "Retraining %s — %s"}' \
+                  "${{ job.status }}" "${{ steps.train.outputs.summary }}")"
