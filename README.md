@@ -66,7 +66,7 @@ flowchart TB
     RAG --> LLM["OpenAI / Llama<br/>(deterministic fallback offline)"]
     SQL --> SQLITE[("Demo SQL DB<br/>read-only, whitelisted")]
     BE --> CACHE[("Redis<br/>response cache")]
-    BE --> PG[("PostgreSQL<br/>users, metadata")]
+    BE --> DB[("SQLite / Postgres<br/>users · conversations · documents")]
     BE --> ADMIN["Admin Analytics"]
     ORCH -.retrain.-> MLOPS["MLOps<br/>Model Registry · Drift Gate"]
 ```
@@ -98,7 +98,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
 export PYTHONPATH=.:backend
-pytest tests/ -v                 # 50 tests, fully offline
+pytest tests/ -v                 # 67 tests, fully offline
 ruff check backend ai tests scripts
 
 uvicorn app.main:app --app-dir backend --reload   # http://localhost:8000
@@ -115,6 +115,35 @@ curl -X POST http://localhost:8000/api/v1/chat \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"message": "How many open tickets are there?"}'
 ```
+
+## Persistence
+
+Users, conversations, and document metadata live in SQLite, addressed by
+`DATABASE_URL` (default `sqlite:///./data/app.db`). They used to be Python
+dicts, which meant a restart silently dropped every registered account,
+every in-flight conversation, and the platform's record of documents whose
+bytes were still sitting on disk.
+
+Deliberately stdlib `sqlite3`, not SQLAlchemy. The premise of this project is
+that it boots and tests with no external services, and the three things that
+must outlive a process are small, relational, and single-writer — SQLite in WAL
+mode is the right size of tool. The swap seam is `DATABASE_URL` plus the narrow
+surface of `app/services/db.py` (`execute` / `query` / `query_one`); no caller
+holds a connection, so moving to the RDS Postgres the Terraform already
+provisions is a change to one module.
+
+Two details worth knowing:
+
+- **Demo-user seeding is idempotent.** It inserts only what is missing, so
+  restarting against an existing database neither raises nor resets a password
+  an operator has changed since.
+- **`UNIQUE(email)` is the guard against duplicate registration**, not a
+  check-then-insert. `test_concurrent_registration_of_one_email_yields_one_user`
+  fires eight threads at the same address and asserts one winner and seven
+  rejections.
+
+A bad `DATABASE_URL` logs a warning and falls back to in-memory rather than
+refusing to boot — a typo in config should not take the platform down.
 
 ## Docker setup
 
@@ -163,7 +192,7 @@ Measured locally (`pytest -v` + manual `curl` timing, hashing embedder, in-memor
 | Hybrid search (top-5, 100-chunk index) | ~4ms |
 | Agent routing decision (`classify()`) | <1ms |
 | End-to-end `/chat` round trip (offline fallback) | ~6ms |
-| Full test suite (50 tests) | ~2.6s |
+| Full test suite (67 tests) | ~8.5s |
 
 The offline fallback numbers are a floor, not a production SLA — they demonstrate the platform's own overhead is negligible; real-world latency is set by whichever LLM/vector backend you point it at.
 
@@ -200,7 +229,7 @@ enterprise-ai-platform/
 
 ```bash
 export PYTHONPATH=.:backend
-pytest tests/ -v          # 50 tests: auth, rag, agents, api, evaluation, model registry
+pytest tests/ -v          # 67 tests: auth, rag, agents, api, evaluation, model registry, persistence
 ruff check backend ai tests scripts
 cd frontend && npm run build
 ```
