@@ -2,7 +2,9 @@
 then hand back a fresh TestClient per test module."""
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,13 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "backend"))
+
+# Point persistence at a throwaway file before app.config is imported, so the
+# suite never reads or writes the developer's real data/app.db. A file rather
+# than :memory: because the stores are separate Database instances and would
+# otherwise each get their own private in-memory schema.
+_TEST_DB = Path(tempfile.mkdtemp(prefix="enterprise-ai-tests-")) / "test.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
