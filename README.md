@@ -22,7 +22,7 @@ Employees at most companies waste hours a week re-finding information that alrea
 
 ## Features
 
-**Authentication** — JWT login, Google OAuth (authorization-code flow), role-based access control enforced server-side on every route (not just hidden in the UI).
+**Authentication** — JWT login, Google OAuth (authorization-code flow; token exchange is stubbed for offline/dev use and raises `NotImplementedError` if real Google credentials are configured), role-based access control enforced server-side on every route (not just hidden in the UI).
 
 **AI chat** — ChatGPT-style interface with conversation history, rolling memory summarization, streaming responses (SSE), and inline source citations on every grounded answer.
 
@@ -221,7 +221,7 @@ enterprise-ai-platform/
 ├── monitoring/            # Prometheus scrape config + alert rules
 ├── docs/                  # API, deployment, MLOps docs
 ├── architecture/          # Mermaid architecture diagrams
-├── tests/                 # 50 pytest tests, fully offline
+├── tests/                 # 67 pytest tests, fully offline
 └── scripts/                # seed_demo_db.py, train_router.py
 ```
 
