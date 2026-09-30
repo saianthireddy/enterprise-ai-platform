@@ -14,7 +14,7 @@
 
 **An AI copilot for enterprises** — the RAG + multi-agent layer that sits on top of a company's PDFs, SOPs, tickets, wikis, and databases so employees stop losing hours to search. Think Copilot + ChatGPT + RAG + AI agents, purpose-built for internal knowledge.
 
-Every layer runs and tests **without any external API keys**: the LLM, vector store, and cache all have deterministic offline fallbacks, and swap to OpenAI/Pinecone/Redis with three environment variables.
+Every layer runs and tests **without any external API keys**: the LLM, vector store, and cache all have deterministic offline fallbacks. Setting `OPENAI_API_KEY` swaps in real chat completions; the Pinecone and Redis adapters exist in `vector-db/` but the API wires the in-memory store today.
 
 ## Why this exists
 
@@ -82,7 +82,7 @@ docker compose -f docker/docker-compose.yml up --build
 # frontend: http://localhost:3000  ·  API docs: http://localhost:8000/docs
 ```
 
-Login with the seeded demo account (`admin@enterprise-ai.demo` / `ChangeMe123!`), or run `npm run dev` in `frontend/` against a local backend. A recorded walkthrough GIF will be linked here once the platform has a persistent public deployment.
+Login with the seeded demo account (`admin@enterprise-ai.demo` / `ChangeMe123!`). Demo accounts are only created when `ENVIRONMENT=development` (or `SEED_DEMO_USERS=true`), because their passwords are public. Or run `npm run dev` in `frontend/` against a local backend. A recorded walkthrough GIF will be linked here once the platform has a persistent public deployment.
 
 ## API documentation
 
@@ -98,7 +98,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 
 export PYTHONPATH=.:backend
-pytest tests/ -v                 # 67 tests, fully offline
+pytest tests/ -v                 # 96 tests, fully offline
 ruff check backend ai tests scripts
 
 uvicorn app.main:app --app-dir backend --reload   # http://localhost:8000
@@ -109,12 +109,21 @@ cd frontend && npm install && npm run dev          # http://localhost:3000
 Ask something once both are running:
 
 ```bash
-TOKEN=$(curl -s -X POST "http://localhost:8000/api/v1/auth/login?email=admin@enterprise-ai.demo&password=ChangeMe123!" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -d "username=admin@enterprise-ai.demo" --data-urlencode "password=ChangeMe123!" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"message": "How many open tickets are there?"}'
 ```
+
+## Security
+
+- **Secrets.** Outside `ENVIRONMENT=development` the backend refuses to start if `SECRET_KEY` is a placeholder from this repo or shorter than 32 characters, since anyone could forge an admin token with it. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+- **Demo accounts.** Only seeded in development (override with `SEED_DEMO_USERS`). The Google OAuth stub, which turns any code into an account, is also development-only.
+- **Login.** Standard OAuth2 password flow: credentials go in a form body (`username`, `password`), never the URL, so they stay out of access logs.
+- **Conversations** belong to the user who started them; anyone else gets a 404 on read or append.
+- **SQL agent.** Generated SQL is checked, then run on a read-only connection with a SQLite authorizer that only allows SELECT, reads of the three whitelisted tables and a fixed set of functions.
 
 ## Persistence
 
