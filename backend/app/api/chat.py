@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.auth.rbac import get_current_user
@@ -16,11 +16,23 @@ from app.services.conversation import conversation_store
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+def _conversation_for(conversation_id: str | None, user: dict) -> str:
+    """Resolve the conversation a request may write to.
+
+    No id, or an id that does not exist yet, starts a new conversation owned by
+    the caller. An existing id owned by someone else is refused with 404, so one
+    user can neither read nor append to another user's thread.
+    """
+    if conversation_id is None or not conversation_store.exists(conversation_id):
+        return conversation_store.create(owner_id=user["id"])
+    if not conversation_store.is_owned_by(conversation_id, user["id"]):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
+    return conversation_id
+
+
 @router.post("", response_model=ChatResponse)
 def chat(payload: ChatRequest, user: dict = Depends(get_current_user)) -> ChatResponse:
-    conversation_id = payload.conversation_id or conversation_store.create()
-    if not conversation_store.exists(conversation_id):
-        conversation_id = conversation_store.create()
+    conversation_id = _conversation_for(payload.conversation_id, user)
 
     conversation_store.append(
         conversation_id, ChatMessage(role=ChatMessageRole.USER, content=payload.message)
@@ -60,8 +72,9 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)) ->
     """Server-sent events stream: emits the answer token-by-token (whitespace
     split) so the frontend can render progressively, same as ChatGPT-style UIs."""
 
+    conversation_id = _conversation_for(payload.conversation_id, user)
+
     def event_generator():
-        conversation_id = payload.conversation_id or conversation_store.create()
         route_result = orchestrator.route(payload.message, explicit_agent=payload.agent)
         words = route_result.result.output.split(" ")
         for i, word in enumerate(words):
@@ -79,4 +92,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)) ->
 
 @router.get("/{conversation_id}/history", response_model=list[ChatMessage])
 def history(conversation_id: str, user: dict = Depends(get_current_user)) -> list[ChatMessage]:
+    if not conversation_store.is_owned_by(conversation_id, user["id"]):
+        # 404 rather than 403, so the endpoint does not confirm which ids exist.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
     return conversation_store.history(conversation_id)
