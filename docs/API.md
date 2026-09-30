@@ -7,9 +7,9 @@ Base URL: `http://localhost:8000/api/v1` (interactive docs at `/docs`, OpenAPI s
 | Method | Path | Description |
 |---|---|---|
 | POST | `/auth/signup` | Create a user (email + password + full name) |
-| POST | `/auth/login` | Exchange email/password for a JWT (`?email=&password=`) |
+| POST | `/auth/login` | Exchange credentials for a JWT. Form-encoded body: `username` (the email) and `password` (OAuth2 password flow) |
 | GET | `/auth/oauth/google/authorize` | Get the Google OAuth authorization URL |
-| POST | `/auth/oauth/google/callback` | Exchange an authorization code for a JWT |
+| POST | `/auth/oauth/google/callback` | Exchange an authorization code for a JWT (offline stub works in development only; 501 elsewhere until Google credentials are wired) |
 | GET | `/auth/me` | Current user profile (requires `Authorization: Bearer <token>`) |
 
 ## Chat
@@ -18,7 +18,7 @@ Base URL: `http://localhost:8000/api/v1` (interactive docs at `/docs`, OpenAPI s
 |---|---|---|
 | POST | `/chat` | Send a message; routed to the right agent automatically or via `agent` override |
 | POST | `/chat/stream` | Same, as a server-sent-events stream (token-by-token) |
-| GET | `/chat/{conversation_id}/history` | Full message history for a conversation |
+| GET | `/chat/{conversation_id}/history` | Full message history for a conversation you own (404 otherwise) |
 
 ## Documents
 
