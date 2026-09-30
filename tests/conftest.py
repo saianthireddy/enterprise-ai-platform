@@ -19,6 +19,9 @@ sys.path.insert(0, str(REPO_ROOT / "backend"))
 # otherwise each get their own private in-memory schema.
 _TEST_DB = Path(tempfile.mkdtemp(prefix="enterprise-ai-tests-")) / "test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
+# A test-only key of recommended length (RFC 7518 §3.2), so PyJWT does not warn
+# about the short development placeholder on every token.
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-0123456789abcdef")
 
 from app.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
