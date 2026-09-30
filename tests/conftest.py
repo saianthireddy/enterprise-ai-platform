@@ -33,7 +33,7 @@ def client() -> TestClient:
 def admin_token(client: TestClient) -> str:
     resp = client.post(
         "/api/v1/auth/login",
-        params={"email": "admin@enterprise-ai.demo", "password": "ChangeMe123!"},
+        data={"username": "admin@enterprise-ai.demo", "password": "ChangeMe123!"},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()["access_token"]
@@ -43,7 +43,7 @@ def admin_token(client: TestClient) -> str:
 def user_token(client: TestClient) -> str:
     resp = client.post(
         "/api/v1/auth/login",
-        params={"email": "analyst@enterprise-ai.demo", "password": "ChangeMe123!"},
+        data={"username": "analyst@enterprise-ai.demo", "password": "ChangeMe123!"},
     )
     assert resp.status_code == 200, resp.text
     return resp.json()["access_token"]

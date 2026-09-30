@@ -41,5 +41,55 @@ class Settings:
         default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
     )
 
+    # The demo accounts have passwords published in the README, so they are
+    # only created in development unless explicitly requested.
+    seed_demo_users: bool = field(
+        default_factory=lambda: _bool_env(
+            "SEED_DEMO_USERS", os.getenv("ENVIRONMENT", "development") == "development"
+        )
+    )
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Placeholder values shipped in this repo. Anyone can read them, so a token
+# signed with one of them can be forged by anyone.
+KNOWN_PLACEHOLDER_SECRETS = frozenset({
+    "",
+    "dev-secret-change-me",
+    "change-me-to-a-long-random-value",
+    "replace-with-a-strong-random-value",
+})
+MIN_SECRET_LENGTH = 32
+
+
+def check_runtime_settings(s: Settings) -> list[str]:
+    """Refuse to run outside development with a forgeable JWT secret.
+
+    Returns warnings for development; raises ``RuntimeError`` otherwise.
+    """
+    weak = s.secret_key in KNOWN_PLACEHOLDER_SECRETS or len(s.secret_key) < MIN_SECRET_LENGTH
+    if weak and not s.is_development:
+        raise RuntimeError(
+            f"SECRET_KEY is a placeholder or shorter than {MIN_SECRET_LENGTH} characters. "
+            "Set a long random value (e.g. `python -c \"import secrets; print(secrets.token_urlsafe(48))\"`) "
+            f"before running with ENVIRONMENT={s.environment!r}."
+        )
+    warnings = []
+    if weak:
+        warnings.append("SECRET_KEY is a development placeholder; tokens can be forged. Never deploy with it.")
+    if s.seed_demo_users and not s.is_development:
+        warnings.append("SEED_DEMO_USERS is on outside development; the demo passwords are public.")
+    return warnings
+
 
 settings = Settings()

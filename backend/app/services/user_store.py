@@ -7,6 +7,10 @@ no caller changed.
 Demo-user seeding is idempotent: it inserts only what is missing, so restarting
 against an existing database neither raises nor resets a password an operator
 has since changed.
+
+The demo passwords are published in the README, so seeding only happens in
+development (or with ``SEED_DEMO_USERS=true``). A production deployment starts
+with no accounts that anyone on the internet already knows the password to.
 """
 from __future__ import annotations
 
@@ -34,9 +38,10 @@ def _row_to_user(row: sqlite3.Row | None) -> dict | None:
 
 
 class UserStore:
-    def __init__(self, db: Database | None = None) -> None:
+    def __init__(self, db: Database | None = None, seed_demo_users: bool | None = None) -> None:
         self.db = db or Database(settings.database_url)
-        self._seed_demo_users()
+        if settings.seed_demo_users if seed_demo_users is None else seed_demo_users:
+            self._seed_demo_users()
 
     def _seed_demo_users(self) -> None:
         for email, password, full_name, role in DEMO_USERS:

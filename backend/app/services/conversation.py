@@ -3,6 +3,9 @@
 Was in-memory, so a restart lost every thread mid-conversation. Interface is
 unchanged; the trimming behaviour is now expressed as a delete of the oldest
 rows rather than a list slice, and the summary is a column on the conversation.
+
+Every conversation created through the API records its owner, and the API
+only lets that user read or continue it (see ``is_owned_by``).
 """
 from __future__ import annotations
 
@@ -21,13 +24,22 @@ class ConversationStore:
     def __init__(self, db: Database | None = None) -> None:
         self.db = db or Database(settings.database_url)
 
-    def create(self) -> str:
+    def create(self, owner_id: str | None = None) -> str:
         conv_id = str(uuid.uuid4())
         self.db.execute(
-            "INSERT INTO conversations (id, summary, created_at) VALUES (?, NULL, ?)",
-            (conv_id, datetime.now(timezone.utc).isoformat()),  # noqa: UP017
+            "INSERT INTO conversations (id, summary, created_at, owner_id) VALUES (?, NULL, ?, ?)",
+            (conv_id, datetime.now(timezone.utc).isoformat(), owner_id),  # noqa: UP017
         )
         return conv_id
+
+    def is_owned_by(self, conversation_id: str, user_id: str) -> bool:
+        """True only if the conversation exists and belongs to *user_id*.
+
+        Conversations with no recorded owner (created before ownership existed)
+        belong to nobody, so they cannot be read through the API.
+        """
+        row = self.db.query_one("SELECT owner_id FROM conversations WHERE id = ?", (conversation_id,))
+        return row is not None and row["owner_id"] is not None and row["owner_id"] == user_id
 
     def _ensure(self, conversation_id: str) -> None:
         """append() used to create the thread implicitly via setdefault; keep that."""

@@ -4,10 +4,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 
 from app.auth.oauth import build_authorization_url, exchange_code_for_profile
 from app.auth.rbac import get_current_user
 from app.auth.security import create_access_token, verify_password
+from app.config import settings
 from app.models.schemas import OAuthLoginRequest, Token, UserCreate, UserOut
 from app.services.user_store import user_store
 
@@ -25,9 +27,15 @@ def signup(payload: UserCreate) -> UserOut:
 
 
 @router.post("/login", response_model=Token)
-def login(email: str, password: str) -> Token:
-    user = user_store.get_by_email(email)
-    if not user or not verify_password(password, user["password_hash"]):
+def login(form: OAuth2PasswordRequestForm = Depends()) -> Token:
+    """Standard OAuth2 password flow: form-encoded ``username`` (the email) and
+    ``password`` in the request body.
+
+    Credentials used to travel as query parameters, which lands passwords in
+    access logs, proxy logs and browser history.
+    """
+    user = user_store.get_by_email(form.username)
+    if not user or not verify_password(form.password, user["password_hash"]):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
     token, expires_in = create_access_token(subject=user["id"], role=user["role"])
     return Token(access_token=token, expires_in=expires_in)
@@ -41,6 +49,10 @@ def google_authorize(redirect_uri: str) -> dict:
 
 @router.post("/oauth/google/callback", response_model=Token)
 def google_callback(payload: OAuthLoginRequest) -> Token:
+    oauth_configured = bool(settings.google_oauth_client_id and settings.google_oauth_client_secret)
+    if not oauth_configured and not settings.is_development:
+        # The offline stub turns *any* code into an account; never outside dev.
+        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "Google OAuth is not configured")
     profile = exchange_code_for_profile(payload.code)
     user = user_store.get_or_create_oauth_user(profile["email"], profile["full_name"])
     token, expires_in = create_access_token(subject=user["id"], role=user["role"])

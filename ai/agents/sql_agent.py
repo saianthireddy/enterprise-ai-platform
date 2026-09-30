@@ -1,9 +1,15 @@
 """Natural-language -> SQL agent with a hard read-only safety boundary.
 
-Demo schema: employees, tickets, orders. The safety guard rejects anything
-that is not a single SELECT statement touching only whitelisted tables —
-this runs even if a real LLM produced the SQL, so it's the actual security
-boundary, not just a prompt instruction.
+Demo schema: employees, tickets, orders. Two layers keep generated SQL
+read-only and inside the whitelist, and both run even if a real LLM wrote the
+query, so neither depends on a prompt instruction:
+
+1. ``validate_sql`` rejects obvious problems early with a readable error.
+2. The query then runs on a **read-only** connection with a SQLite authorizer
+   that permits only SELECT, reads of whitelisted tables, and a fixed set of
+   functions. The authorizer sees the statement SQLite actually compiled, so
+   comma joins, subqueries and odd spellings that slip past a regex are still
+   refused. It is the real security boundary.
 """
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ from ai.agents.base import AgentResult, BaseAgent
 
 ALLOWED_TABLES = {"employees", "tickets", "orders"}
 FORBIDDEN_KEYWORDS = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|PRAGMA|REPLACE)\b", re.IGNORECASE
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|ATTACH|DETACH|PRAGMA|REPLACE|VACUUM|LOAD_EXTENSION)\b", re.IGNORECASE
 )
 
 DEMO_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "demo.db"
@@ -36,16 +42,68 @@ INTENT_TEMPLATES: list[tuple[re.Pattern, str]] = [
 ]
 
 
+_TABLE_LIST = re.compile(
+    r"\b(?:FROM|JOIN)\s+(.+?)(?=\b(?:WHERE|GROUP|ORDER|LIMIT|JOIN|ON|HAVING|UNION|INNER|LEFT|RIGHT|CROSS|OUTER|NATURAL)\b|\)|;|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Aggregates and scalar helpers the templates (and a reasonable LLM) need.
+ALLOWED_FUNCTIONS = {
+    "count", "sum", "avg", "min", "max", "round", "abs", "lower", "upper",
+    "length", "coalesce", "ifnull", "date", "strftime", "substr", "trim",
+}
+
+
+def _referenced_tables(sql: str) -> set[str]:
+    """Every table named after FROM/JOIN, including comma-separated lists."""
+    tables: set[str] = set()
+    for match in _TABLE_LIST.finditer(sql):
+        for part in match.group(1).split(","):
+            words = part.strip().lstrip("(").split()
+            if words:
+                tables.add(words[0].strip("`\"[]").lower())
+    return tables
+
+
 def validate_sql(sql: str) -> None:
     stripped = sql.strip().rstrip(";")
     if not stripped.upper().startswith("SELECT"):
         raise ValueError("Only SELECT statements are permitted")
+    if ";" in stripped:
+        raise ValueError("Only a single statement is permitted")
     if FORBIDDEN_KEYWORDS.search(stripped):
         raise ValueError("Statement contains a forbidden keyword")
-    tables_mentioned = set(re.findall(r"FROM\s+(\w+)|JOIN\s+(\w+)", stripped, re.IGNORECASE))
-    flat = {t for pair in tables_mentioned for t in pair if t}
-    if not flat.issubset(ALLOWED_TABLES):
-        raise ValueError(f"Query references non-whitelisted table(s): {flat - ALLOWED_TABLES}")
+    if "sqlite_" in stripped.lower():
+        raise ValueError("SQLite internal tables are not queryable")
+    tables = _referenced_tables(stripped)
+    if not tables <= ALLOWED_TABLES:
+        raise ValueError(f"Query references non-whitelisted table(s): {tables - ALLOWED_TABLES}")
+
+
+def _authorizer(action: int, arg1, arg2, db_name, trigger) -> int:
+    """SQLite authorizer: allow SELECT, reads of whitelisted tables, and
+    whitelisted functions. Everything else is denied at compile time."""
+    if action == sqlite3.SQLITE_SELECT:
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_READ:
+        return sqlite3.SQLITE_OK if (arg1 or "").lower() in ALLOWED_TABLES else sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_FUNCTION:
+        return sqlite3.SQLITE_OK if (arg2 or "").lower() in ALLOWED_FUNCTIONS else sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_DENY
+
+
+def run_readonly(db_path: str | Path, sql: str, params: dict[str, Any] | None = None) -> list[sqlite3.Row]:
+    """Validate, then execute on a read-only connection guarded by the authorizer."""
+    validate_sql(sql)
+    conn = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.set_authorizer(_authorizer)
+        return conn.execute(sql, params or {}).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(f"Query rejected: {exc}") from exc
+    finally:
+        conn.close()
 
 
 class SQLAgent(BaseAgent):
@@ -84,13 +142,7 @@ class SQLAgent(BaseAgent):
                 metadata={"sql": None},
             )
 
-        validate_sql(sql)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            rows = conn.execute(sql, params).fetchall()
-        finally:
-            conn.close()
+        rows = run_readonly(self.db_path, sql, params)
 
         rows_as_dicts = [dict(r) for r in rows]
         summary = "; ".join(

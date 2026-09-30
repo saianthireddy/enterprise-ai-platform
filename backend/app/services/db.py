@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS conversations (
     id         TEXT PRIMARY KEY,
     summary    TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    owner_id   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -96,7 +97,19 @@ class Database:
                 # (and unsupported) for :memory:, hence the guard.
                 self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created.
+
+        ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so a
+        database from before conversation ownership lacks ``owner_id``. Those
+        older conversations keep a NULL owner and are readable by nobody.
+        """
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(conversations)")}
+        if "owner_id" not in columns:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN owner_id TEXT")
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> sqlite3.Cursor:
         with self._lock:

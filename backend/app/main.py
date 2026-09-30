@@ -15,11 +15,16 @@ from starlette.responses import Response
 
 from app.api import admin, agents, chat, documents
 from app.auth.routes import router as auth_router
-from app.config import settings
+from app.config import check_runtime_settings, settings
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# Fail fast: outside development, a placeholder SECRET_KEY means anyone can
+# mint an admin token, so the app refuses to start rather than run insecurely.
+for _warning in check_runtime_settings(settings):
+    logging.getLogger(__name__).warning(_warning)
 
 
 @asynccontextmanager

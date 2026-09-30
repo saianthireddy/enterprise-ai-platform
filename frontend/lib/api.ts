@@ -40,8 +40,13 @@ export interface Token {
 }
 
 export async function login(email: string, password: string): Promise<Token> {
-  const params = new URLSearchParams({ email, password });
-  const res = await fetch(`${API_BASE}/api/v1/auth/login?${params.toString()}`, { method: "POST" });
+  // OAuth2 password flow: credentials go in a form-encoded body, never the URL.
+  const body = new URLSearchParams({ username: email, password });
+  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
   if (!res.ok) throw new Error("Invalid email or password");
   return res.json();
 }

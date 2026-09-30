@@ -17,7 +17,7 @@ def test_signup_and_login_flow(client: TestClient):
     assert signup.status_code == 201
 
     login = client.post(
-        "/api/v1/auth/login", params={"email": "new.user@example.com", "password": "SuperSecret1"}
+        "/api/v1/auth/login", data={"username": "new.user@example.com", "password": "SuperSecret1"}
     )
     assert login.status_code == 200
     assert "access_token" in login.json()
@@ -26,7 +26,7 @@ def test_signup_and_login_flow(client: TestClient):
 def test_login_rejects_wrong_password(client: TestClient):
     resp = client.post(
         "/api/v1/auth/login",
-        params={"email": "admin@enterprise-ai.demo", "password": "wrong-password"},
+        data={"username": "admin@enterprise-ai.demo", "password": "wrong-password"},
     )
     assert resp.status_code == 401
 
